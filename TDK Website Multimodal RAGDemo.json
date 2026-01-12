@@ -1,0 +1,800 @@
+{
+    "name": "TDK Multimodal RAG (Images + Tables)",
+    "nodes": [
+        {
+            "parameters": {
+                "content": "# 🤖 TDK Multimodal RAG\n\n**Content Handling:**\n\n✅ **Text**: Clean extraction with structure preserved\n✅ **Tables**: Converted to readable markdown format\n✅ **Images**: GPT-4o Vision describes each image\n✅ **Diagrams**: Captured via Vision (including product logos)\n\n**NOT handled (by design):**\n❌ Videos - excluded per requirements\n\n**Created by:** Kiki\n**Date:** January 2026",
+                "height": 340,
+                "width": 380,
+                "color": 7
+            },
+            "id": "sticky-overview",
+            "name": "Overview",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                -600,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "content": "## 📊 TABLE HANDLING\n\n**Problem:** HTML tables become unreadable when tags are stripped\n\n**Before:**\n```\nAccuracy Cost Best Fit Entry-level Lowest Telematics\n```\n\n**After (Markdown):**\n```\n| Product | Accuracy | Cost | Best Fit |\n|---------|----------|------|----------|\n| TRACK | Entry-level | Lowest | Telematics |\n| DRIVE | Mid-range | Moderate | ADAS |\n| AUTO | Highest | Higher | Autonomous |\n```\n\nThe AI can now understand product comparisons!",
+                "height": 380,
+                "width": 400,
+                "color": 5
+            },
+            "id": "sticky-tables",
+            "name": "Table Handling",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                520,
+                -280
+            ]
+        },
+        {
+            "parameters": {
+                "content": "## 🖼️ IMAGE FILTERING\n\n**Include (send to Vision):**\n- Product photos\n- Technical diagrams\n- Architecture illustrations\n- Use case images\n- Images > 100x100 pixels (from URL params)\n\n**Exclude:**\n- Icons (< 50px or 'icon' in path)\n- Logos (except product logos)\n- Tracking pixels\n- Navigation elements\n- Decorative backgrounds\n\n**Smart filtering by:**\n- URL patterns\n- Alt text keywords\n- Image dimensions in URL",
+                "height": 380,
+                "width": 340,
+                "color": 5
+            },
+            "id": "sticky-images",
+            "name": "Image Filtering",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                960,
+                -280
+            ]
+        },
+        {
+            "parameters": {},
+            "id": "manual-trigger",
+            "name": "1. Start Ingestion",
+            "type": "n8n-nodes-base.manualTrigger",
+            "typeVersion": 1,
+            "position": [
+                0,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "urls",
+                            "name": "urls",
+                            "value": "=[\n  {\"url\": \"https://trustedpositioning.tdk.com/\", \"page\": \"homepage\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/auto\", \"page\": \"auto\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/track\", \"page\": \"track\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/drive\", \"page\": \"drive\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/stride\", \"page\": \"stride\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/ride\", \"page\": \"ride\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/venue\", \"page\": \"venue\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/faq\", \"page\": \"faq\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/our-technology\", \"page\": \"technology\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/automotive\", \"page\": \"automotive-industry\"},\n  {\"url\": \"https://trustedpositioning.tdk.com/industrial-and-robotics\", \"page\": \"industrial-robotics\"}\n]",
+                            "type": "array"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "set-urls",
+            "name": "2. Define Page URLs",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                220,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "delete",
+                "tableId": "documents",
+                "filterType": "string",
+                "filterString": "metadata->>source=like.*trustedpositioning*"
+            },
+            "id": "clear-docs",
+            "name": "3. Clear Old Docs",
+            "type": "n8n-nodes-base.supabase",
+            "typeVersion": 1,
+            "position": [
+                440,
+                200
+            ],
+            "alwaysOutputData": true,
+            "credentials": {
+                "supabaseApi": {
+                    "id": "YOUR_SUPABASE_ID",
+                    "name": "Supabase account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const urls = $('2. Define Page URLs').first().json.urls;\nreturn urls.map(item => ({ json: item }));"
+            },
+            "id": "split-urls",
+            "name": "4. Split Into Items",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                660,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "url": "={{ $json.url }}",
+                "options": {
+                    "response": {
+                        "response": {
+                            "responseFormat": "text"
+                        }
+                    }
+                }
+            },
+            "id": "fetch-html",
+            "name": "5. Fetch Page HTML",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                880,
+                200
+            ],
+            "retryOnFail": true
+        },
+        {
+            "parameters": {
+                "jsCode": "// ENHANCED CONTENT EXTRACTION\n// Properly handles: Tables, Images, Diagrams, Text\n// Excludes: Videos, tiny icons, tracking pixels\n\nlet html = $input.first().json.data || '';\nhtml = typeof html === 'string' ? html : String(html || '');\nconst page = $input.first().json.page;\nconst baseUrl = $input.first().json.url;\n\n// Helper to resolve relative URLs\nfunction resolveUrl(src, base) {\n  try {\n    return new URL(src, base).href;\n  } catch (e) {\n    return src;\n  }\n}\n\n// ===========================================\n// 1. EXTRACT AND CONVERT TABLES TO MARKDOWN\n// ===========================================\nfunction extractTables(html) {\n  const tables = [];\n  const tableRegex = /<table[^>]*>([\\s\\S]*?)<\\/table>/gi;\n  let tableMatch;\n  \n  while ((tableMatch = tableRegex.exec(html)) !== null) {\n    const tableHtml = tableMatch[0];\n    const rows = [];\n    \n    // Extract rows\n    const rowRegex = /<tr[^>]*>([\\s\\S]*?)<\\/tr>/gi;\n    let rowMatch;\n    \n    while ((rowMatch = rowRegex.exec(tableHtml)) !== null) {\n      const rowHtml = rowMatch[1];\n      const cells = [];\n      \n      // Extract cells (th or td)\n      const cellRegex = /<t[hd][^>]*>([\\s\\S]*?)<\\/t[hd]>/gi;\n      let cellMatch;\n      \n      while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {\n        // Clean cell content\n        let cellText = cellMatch[1]\n          .replace(/<[^>]+>/g, ' ')\n          .replace(/&nbsp;/g, ' ')\n          .replace(/\\s+/g, ' ')\n          .trim();\n        cells.push(cellText);\n      }\n      \n      if (cells.length > 0) {\n        rows.push(cells);\n      }\n    }\n    \n    // Convert to markdown table\n    if (rows.length > 0) {\n      let markdown = '\\n\\n**[TABLE]**\\n';\n      const maxCols = Math.max(...rows.map(r => r.length));\n      \n      // Header row\n      markdown += '| ' + rows[0].map(c => c || '-').join(' | ') + ' |\\n';\n      markdown += '|' + ' --- |'.repeat(maxCols) + '\\n';\n      \n      // Data rows\n      for (let i = 1; i < rows.length; i++) {\n        const paddedRow = [...rows[i]];\n        while (paddedRow.length < maxCols) paddedRow.push('-');\n        markdown += '| ' + paddedRow.join(' | ') + ' |\\n';\n      }\n      \n      tables.push(markdown);\n    }\n  }\n  \n  return tables;\n}\n\n// ===========================================\n// 2. EXTRACT IMAGES (SMART FILTERING)\n// ===========================================\nfunction extractImages(html, baseUrl) {\n  const images = [];\n  const imageRegex = /<img[^>]+>/gi;\n  let match;\n  \n  while ((match = imageRegex.exec(html)) !== null) {\n    const imgTag = match[0];\n    \n    // Get src (check both src and data-src for lazy loading)\n    let srcMatch = imgTag.match(/(?:data-src|src)=['\"]([^'\"]+)['\"]/i);\n    const altMatch = imgTag.match(/alt=['\"]([^'\"]*?)['\"]/i);\n    \n    if (!srcMatch) continue;\n    \n    let src = srcMatch[1];\n    const alt = altMatch ? altMatch[1] : '';\n    \n    // Resolve URL\n    src = resolveUrl(src, baseUrl);\n    \n    // FILTERING LOGIC\n    const srcLower = src.toLowerCase();\n    const altLower = alt.toLowerCase();\n    \n    // EXCLUDE patterns\n    if (\n      // Tiny images / icons\n      srcLower.includes('icon') ||\n      srcLower.includes('favicon') ||\n      srcLower.includes('pixel') ||\n      srcLower.includes('spacer') ||\n      srcLower.includes('blank') ||\n      srcLower.includes('arrow') ||\n      srcLower.includes('bullet') ||\n      // Social media icons\n      srcLower.includes('linkedin') ||\n      srcLower.includes('twitter') ||\n      srcLower.includes('facebook') ||\n      srcLower.includes('youtube') && srcLower.includes('icon') ||\n      // Navigation elements\n      srcLower.includes('menu') ||\n      srcLower.includes('hamburger') ||\n      srcLower.includes('close') ||\n      srcLower.includes('search') ||\n      // Check for very small dimensions in Wix URLs\n      /\\/w_[1-4]\\d,/.test(src) ||  // width < 50\n      /\\/h_[1-4]\\d,/.test(src) ||  // height < 50\n      // Base64 tiny images\n      src.startsWith('data:') && src.length < 500\n    ) {\n      continue;\n    }\n    \n    // INCLUDE patterns (product-related)\n    const isProductImage = \n      altLower.includes('product') ||\n      altLower.includes('auto') ||\n      altLower.includes('track') ||\n      altLower.includes('drive') ||\n      altLower.includes('stride') ||\n      altLower.includes('ride') ||\n      altLower.includes('venue') ||\n      altLower.includes('diagram') ||\n      altLower.includes('chart') ||\n      altLower.includes('banner') ||\n      altLower.includes('vehicle') ||\n      altLower.includes('robot') ||\n      altLower.includes('gps') ||\n      altLower.includes('positioning') ||\n      srcLower.includes('tp-product') ||\n      srcLower.includes('banner') ||\n      srcLower.includes('hero');\n    \n    // Check for meaningful image size in Wix URLs\n    const hasGoodSize = \n      /\\/w_[1-9]\\d{2,}/.test(src) ||  // width >= 100\n      /\\/h_[1-9]\\d{2,}/.test(src) ||  // height >= 100\n      !src.includes('wixstatic');      // non-Wix images (can't check size)\n    \n    // Include if it passes filters\n    if (src.startsWith('http') && (isProductImage || hasGoodSize)) {\n      images.push({\n        url: src,\n        alt: alt,\n        isProductImage: isProductImage\n      });\n    }\n  }\n  \n  // Deduplicate by URL\n  const seen = new Set();\n  return images.filter(img => {\n    if (seen.has(img.url)) return false;\n    seen.add(img.url);\n    return true;\n  }).slice(0, 15); // Max 15 images per page\n}\n\n// ===========================================\n// 3. EXTRACT CLEAN TEXT\n// ===========================================\nfunction extractText(html) {\n  let text = html\n    // Remove script, style, nav, footer\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<nav[^>]*>[\\s\\S]*?<\\/nav>/gi, '')\n    .replace(/<footer[^>]*>[\\s\\S]*?<\\/footer>/gi, '')\n    // Remove tables (we handle them separately)\n    .replace(/<table[^>]*>[\\s\\S]*?<\\/table>/gi, ' [TABLE_PLACEHOLDER] ')\n    // Convert headers to markdown-style\n    .replace(/<h1[^>]*>([^<]*)<\\/h1>/gi, '\\n\\n# $1\\n')\n    .replace(/<h2[^>]*>([^<]*)<\\/h2>/gi, '\\n\\n## $1\\n')\n    .replace(/<h3[^>]*>([^<]*)<\\/h3>/gi, '\\n\\n### $1\\n')\n    .replace(/<h4[^>]*>([^<]*)<\\/h4>/gi, '\\n\\n#### $1\\n')\n    .replace(/<h5[^>]*>([^<]*)<\\/h5>/gi, '\\n\\n##### $1\\n')\n    .replace(/<h6[^>]*>([^<]*)<\\/h6>/gi, '\\n\\n###### $1\\n')\n    // Convert list items\n    .replace(/<li[^>]*>/gi, '\\n• ')\n    // Convert paragraphs and divs to newlines\n    .replace(/<\\/p>/gi, '\\n\\n')\n    .replace(/<br[^>]*>/gi, '\\n')\n    // Remove remaining HTML tags\n    .replace(/<[^>]+>/g, ' ')\n    // Decode HTML entities\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/&copy;/g, '©')\n    .replace(/&trade;/g, '™')\n    .replace(/&reg;/g, '®')\n    // Clean up whitespace\n    .replace(/[ \\t]+/g, ' ')\n    .replace(/\\n\\s*\\n\\s*\\n/g, '\\n\\n')\n    .trim();\n  \n  // Remove common boilerplate\n  text = text\n    .replace(/xml version[^\"]*\"[^\"]*\"/g, '')\n    .replace(/top of page|bottom of page/gi, '')\n    .replace(/Sign In|Get Started|Newsletter|Subscribe/gi, '')\n    .replace(/All Rights Reserved[^\\n]*/gi, '')\n    .replace(/Privacy Policy|Terms of Use|Cookie Policy/gi, '')\n    .trim();\n  \n  return text;\n}\n\n// ===========================================\n// MAIN EXTRACTION\n// ===========================================\nconst tables = extractTables(html);\nconst images = extractImages(html, baseUrl);\nlet text = extractText(html);\n\n// Replace table placeholders with actual markdown tables\ntables.forEach((table, i) => {\n  text = text.replace('[TABLE_PLACEHOLDER]', table);\n});\n// Remove any remaining placeholders\ntext = text.replace(/\\[TABLE_PLACEHOLDER\\]/g, '');\n\nreturn [{\n  json: {\n    page: page,\n    url: baseUrl,\n    text: text,\n    images: images,\n    tableCount: tables.length,\n    imageCount: images.length,\n    source: 'trustedpositioning.tdk.com'\n  }\n}];"
+            },
+            "id": "extract-content",
+            "name": "6. Extract Text + Tables + Images",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1100,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Split images for GPT-4o Vision processing\n// Each meaningful image becomes a separate item\n\nconst input = $input.first().json;\nconst images = input.images || [];\n\nif (images.length === 0) {\n  // No images - pass through with empty descriptions\n  return [{\n    json: {\n      ...input,\n      imageDescriptions: [],\n      skipVision: true\n    }\n  }];\n}\n\n// Create one item per image, carry forward page context\nreturn images.map((img, index) => ({\n  json: {\n    imageUrl: img.url,\n    imageAlt: img.alt,\n    isProductImage: img.isProductImage,\n    imageIndex: index,\n    pageData: {\n      page: input.page,\n      url: input.url,\n      text: input.text,\n      tableCount: input.tableCount,\n      source: input.source\n    }\n  }\n}));"
+            },
+            "id": "split-images",
+            "name": "7. Split Images for Vision",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1320,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are analyzing images from TDK Trusted Positioning's website. This company makes GPS/GNSS positioning software that works when satellite signals fail (tunnels, indoors, urban canyons).\\n\\nProducts: AUTO (autonomous vehicles), TRACK (fleet tracking), DRIVE (control-grade), STRIDE (wearables), RIDE (micromobility), VENUE (indoor).\\n\\nDescribe what you see, focusing on:\\n- Technical diagrams: What components/flow are shown?\\n- Product images: What product/use case is depicted?\\n- Charts/comparisons: What data is being compared?\\n- Architecture: What system components are shown?\\n\\nBe specific. If you see text in the image, include key terms. Under 150 words.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Describe this image from the '{{ $json.pageData.page }}' page.{{ $json.imageAlt ? ' Context hint: ' + $json.imageAlt : '' }}\"\n        },\n        {\n          \"type\": \"image_url\",\n          \"image_url\": {\n            \"url\": \"{{ $json.imageUrl }}\",\n            \"detail\": \"low\"\n          }\n        }\n      ]\n    }\n  ],\n  \"max_tokens\": 250\n}",
+                "options": {}
+            },
+            "id": "vision-api",
+            "name": "8. GPT-4o Vision Describe",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1540,
+                200
+            ],
+            "retryOnFail": true,
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_ID",
+                    "name": "OpenAi account"
+                }
+            },
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extract description from GPT-4o response\n\nconst input = $input.first().json;\nlet description = '';\n\ntry {\n  if (input.choices && input.choices[0]) {\n    description = input.choices[0].message.content;\n  } else if (input.error) {\n    description = `[Image analysis failed: ${input.error.message || 'Unknown error'}]`;\n  } else {\n    description = '[Image analysis failed]';\n  }\n} catch (e) {\n  description = '[Image analysis failed]';\n}\n\n// Get original data from split node\nconst splitData = $('7. Split Images for Vision').first().json;\n\nreturn [{\n  json: {\n    description: description,\n    imageUrl: splitData.imageUrl,\n    imageAlt: splitData.imageAlt,\n    imageIndex: splitData.imageIndex,\n    pageData: splitData.pageData\n  }\n}];"
+            },
+            "id": "extract-description",
+            "name": "9. Extract Description",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1760,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "aggregate": "aggregateAllItemData",
+                "options": {}
+            },
+            "id": "aggregate",
+            "name": "10. Aggregate All",
+            "type": "n8n-nodes-base.aggregate",
+            "typeVersion": 1,
+            "position": [
+                1980,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Combine: Text + Tables + Image Descriptions\n// Creates final rich content for embedding\n\nconst items = $input.first().json.data;\n\nif (!items || items.length === 0) {\n  return [{ json: { error: 'No data to process' } }];\n}\n\n// Group by page\nconst pageGroups = {};\n\nitems.forEach(item => {\n  // Handle items that skipped vision (no images)\n  if (item.skipVision) {\n    pageGroups[item.page] = {\n      page: item.page,\n      url: item.url,\n      text: item.text,\n      tableCount: item.tableCount,\n      source: item.source,\n      imageDescriptions: []\n    };\n    return;\n  }\n  \n  // Handle items with image descriptions\n  const page = item.pageData.page;\n  if (!pageGroups[page]) {\n    pageGroups[page] = {\n      page: item.pageData.page,\n      url: item.pageData.url,\n      text: item.pageData.text,\n      tableCount: item.pageData.tableCount,\n      source: item.pageData.source,\n      imageDescriptions: []\n    };\n  }\n  \n  if (item.description && !item.description.includes('failed')) {\n    pageGroups[page].imageDescriptions.push({\n      url: item.imageUrl,\n      alt: item.imageAlt,\n      description: item.description\n    });\n  }\n});\n\n// Create final documents\nconst results = Object.values(pageGroups).map(pageData => {\n  let content = `SOURCE: ${pageData.url}\\nPAGE: ${pageData.page}\\n\\n${pageData.text}`;\n  \n  // Add image descriptions section\n  if (pageData.imageDescriptions.length > 0) {\n    content += '\\n\\n=== VISUAL CONTENT DESCRIPTIONS ===\\n';\n    pageData.imageDescriptions.forEach((img, i) => {\n      content += `\\n[Image ${i + 1}]`;\n      if (img.alt) content += ` (${img.alt})`;\n      content += `:\\n${img.description}\\n`;\n    });\n  }\n  \n  return {\n    json: {\n      content: content,\n      page: pageData.page,\n      url: pageData.url,\n      source: pageData.source,\n      tableCount: pageData.tableCount || 0,\n      imageCount: pageData.imageDescriptions.length,\n      contentType: 'multimodal'\n    }\n  };\n});\n\nreturn results;"
+            },
+            "id": "combine",
+            "name": "11. Combine All Content",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2200,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "model": "text-embedding-3-small",
+                "options": {}
+            },
+            "id": "embeddings",
+            "name": "OpenAI Embeddings",
+            "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+            "typeVersion": 1,
+            "position": [
+                2420,
+                420
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_ID",
+                    "name": "OpenAi account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsonMode": "expressionData",
+                "jsonData": "={{ $json.content }}",
+                "options": {
+                    "metadata": {
+                        "metadataValues": [
+                            {
+                                "name": "page",
+                                "value": "={{ $json.page }}"
+                            },
+                            {
+                                "name": "url",
+                                "value": "={{ $json.url }}"
+                            },
+                            {
+                                "name": "source",
+                                "value": "={{ $json.source }}"
+                            },
+                            {
+                                "name": "contentType",
+                                "value": "={{ $json.contentType }}"
+                            }
+                        ]
+                    }
+                }
+            },
+            "id": "doc-loader",
+            "name": "Document Loader",
+            "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+            "typeVersion": 1,
+            "position": [
+                2580,
+                420
+            ]
+        },
+        {
+            "parameters": {
+                "chunkSize": 1500,
+                "chunkOverlap": 300,
+                "options": {}
+            },
+            "id": "splitter",
+            "name": "Text Splitter",
+            "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+            "typeVersion": 1,
+            "position": [
+                2580,
+                600
+            ]
+        },
+        {
+            "parameters": {
+                "mode": "insert",
+                "tableName": {
+                    "__rl": true,
+                    "value": "documents",
+                    "mode": "list"
+                },
+                "options": {
+                    "queryName": "match_documents"
+                }
+            },
+            "id": "vector-store",
+            "name": "12. Store in Vector DB",
+            "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+            "typeVersion": 1,
+            "position": [
+                2420,
+                200
+            ],
+            "credentials": {
+                "supabaseApi": {
+                    "id": "YOUR_SUPABASE_ID",
+                    "name": "Supabase account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "status",
+                            "name": "status",
+                            "value": "=✅ {{ $json.page }}: {{ $json.tableCount }} tables, {{ $json.imageCount }} images",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "log",
+            "name": "Log Result",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                2640,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "content": "## 🧪 Test Questions\n\n**Table Questions:**\n1. Compare TRACK, DRIVE, and AUTO accuracy\n2. Which product has the fastest response time?\n3. What's the cost difference between products?\n\n**Image/Diagram Questions:**\n4. What does the sensor fusion diagram show?\n5. Describe the architecture\n6. What applications are shown?\n\n**General:**\n7. Which product for delivery vans in tunnels?\n8. Can VENUE track forklifts across floors?\n\n**Success = AI can answer table comparisons AND describe visuals**",
+                "height": 380,
+                "width": 340,
+                "color": 6
+            },
+            "id": "sticky-questions",
+            "name": "Test Questions",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                2800,
+                -100
+            ]
+        },
+        {
+            "parameters": {
+                "content": "## 💬 RAG Chat Interface",
+                "height": 80,
+                "width": 300,
+                "color": 4
+            },
+            "id": "sticky-chat",
+            "name": "Chat Section",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                0,
+                600
+            ]
+        },
+        {
+            "parameters": {
+                "public": true,
+                "options": {}
+            },
+            "id": "chat-trigger",
+            "name": "Customer Chat",
+            "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+            "typeVersion": 1.1,
+            "position": [
+                0,
+                740
+            ],
+            "webhookId": "tdk-multimodal-v2"
+        },
+        {
+            "parameters": {
+                "options": {
+                    "model": "gpt-4o-mini"
+                }
+            },
+            "id": "chat-llm",
+            "name": "GPT-4o-mini",
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+            "typeVersion": 1,
+            "position": [
+                220,
+                940
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_ID",
+                    "name": "OpenAi account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "promptType": "define",
+                "text": "={{ $('Customer Chat').item.json.chatInput }}",
+                "options": {
+                    "systemMessage": "You are a senior product consultant for TDK Trusted Positioning.\\n\\n## Product Decision Guide (Use Case Matching):\\n1. **Use `AUTO` ONLY if** the user explicitly mentions \\\"Autonomous Driving\\\", \\\"L4/L5\\\", or \\\"Robots\\\". Do NOT recommend this for standard delivery trucks.\\n2. **Use `DRIVE` if** the user needs \\\"Navigation\\\", \\\"Lane-level guidance\\\", or \\\"Cockpit/Infotainment\\\" for human drivers.\\n3. **Use `TRACK` if** the user mentions \\\"Delivery Truck\\\", \\\"Fleet Management\\\", \\\"Logistics\\\", or just tracking where assets are.\\n4. **Use `VENUE` if** the user mentions \\\"Warehouse\\\", \\\"Indoor\\\", or \\\"Factories\\\".\\n\\n## Product Specs & Trade-offs:\\n- **AUTO**: Autonomous vehicles (L2+ to L5). Highest accuracy, 0.01s response.\\n- **DRIVE**: Cockpit Navigation & ADAS. 0.01s response (100Hz). Essential for turn-by-turn.\\n- **TRACK**: Fleet/asset tracking. Entry-level accuracy, 1sec update rate (1Hz). PERFECT for managers, too slow for steering.\\n- **STRIDE**: Wearables and IoT\\n\\n## Your Knowledge Base Contains:\\n1. **Text** - Product descriptions with `SOURCE: [URL]` headers\\n2. **Tables** - Comparisons\\n3. **Image Descriptions** - Diagrams\\n\\n## Guidelines:\\n- **CITE YOUR SOURCES**: Every time you state a fact or recommendation, append the source like this: `[Source: Page Name](URL)`. Example: \\\"Key specs are... [Source: Auto Page](https://...)\\\"\\n- **Explain, Don't Apologize**: Explain WHY specs fit the user's needs.\\n- **Be Decisive**: Make a strong recommendation."
+                }
+            },
+            "id": "agent",
+            "name": "TDK Assistant",
+            "type": "@n8n/n8n-nodes-langchain.agent",
+            "typeVersion": 1.6,
+            "position": [
+                220,
+                740
+            ]
+        },
+        {
+            "parameters": {
+                "contextWindowLength": 10
+            },
+            "id": "memory",
+            "name": "Memory",
+            "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+            "typeVersion": 1.2,
+            "position": [
+                360,
+                940
+            ]
+        },
+        {
+            "parameters": {
+                "name": "tdk_knowledge",
+                "description": "TDK Trusted Positioning knowledge base with text, product comparison tables, and image descriptions of diagrams/visuals."
+            },
+            "id": "vector-tool",
+            "name": "Search Knowledge",
+            "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+            "typeVersion": 1,
+            "position": [
+                500,
+                940
+            ]
+        },
+        {
+            "parameters": {
+                "tableName": {
+                    "__rl": true,
+                    "value": "documents",
+                    "mode": "list"
+                },
+                "options": {
+                    "queryName": "match_documents"
+                }
+            },
+            "id": "query-store",
+            "name": "Vector Store",
+            "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+            "typeVersion": 1,
+            "position": [
+                500,
+                1120
+            ],
+            "credentials": {
+                "supabaseApi": {
+                    "id": "YOUR_SUPABASE_ID",
+                    "name": "Supabase account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "model": "text-embedding-3-small",
+                "options": {}
+            },
+            "id": "query-embed",
+            "name": "Query Embed",
+            "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+            "typeVersion": 1,
+            "position": [
+                660,
+                1120
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_ID",
+                    "name": "OpenAi account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "id": "tool-llm",
+            "name": "Tool LLM",
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+            "typeVersion": 1,
+            "position": [
+                660,
+                940
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_ID",
+                    "name": "OpenAi account"
+                }
+            }
+        }
+    ],
+    "pinData": {},
+    "connections": {
+        "1. Start Ingestion": {
+            "main": [
+                [
+                    {
+                        "node": "2. Define Page URLs",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "2. Define Page URLs": {
+            "main": [
+                [
+                    {
+                        "node": "3. Clear Old Docs",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "3. Clear Old Docs": {
+            "main": [
+                [
+                    {
+                        "node": "4. Split Into Items",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "4. Split Into Items": {
+            "main": [
+                [
+                    {
+                        "node": "5. Fetch Page HTML",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "5. Fetch Page HTML": {
+            "main": [
+                [
+                    {
+                        "node": "6. Extract Text + Tables + Images",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "6. Extract Text + Tables + Images": {
+            "main": [
+                [
+                    {
+                        "node": "7. Split Images for Vision",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "7. Split Images for Vision": {
+            "main": [
+                [
+                    {
+                        "node": "8. GPT-4o Vision Describe",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "8. GPT-4o Vision Describe": {
+            "main": [
+                [
+                    {
+                        "node": "9. Extract Description",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "9. Extract Description": {
+            "main": [
+                [
+                    {
+                        "node": "10. Aggregate All",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "10. Aggregate All": {
+            "main": [
+                [
+                    {
+                        "node": "11. Combine All Content",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "11. Combine All Content": {
+            "main": [
+                [
+                    {
+                        "node": "12. Store in Vector DB",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "12. Store in Vector DB": {
+            "main": [
+                [
+                    {
+                        "node": "Log Result",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "OpenAI Embeddings": {
+            "ai_embedding": [
+                [
+                    {
+                        "node": "12. Store in Vector DB",
+                        "type": "ai_embedding",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Document Loader": {
+            "ai_document": [
+                [
+                    {
+                        "node": "12. Store in Vector DB",
+                        "type": "ai_document",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Text Splitter": {
+            "ai_textSplitter": [
+                [
+                    {
+                        "node": "Document Loader",
+                        "type": "ai_textSplitter",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Customer Chat": {
+            "main": [
+                [
+                    {
+                        "node": "TDK Assistant",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "GPT-4o-mini": {
+            "ai_languageModel": [
+                [
+                    {
+                        "node": "TDK Assistant",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Memory": {
+            "ai_memory": [
+                [
+                    {
+                        "node": "TDK Assistant",
+                        "type": "ai_memory",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Search Knowledge": {
+            "ai_tool": [
+                [
+                    {
+                        "node": "TDK Assistant",
+                        "type": "ai_tool",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Vector Store": {
+            "ai_vectorStore": [
+                [
+                    {
+                        "node": "Search Knowledge",
+                        "type": "ai_vectorStore",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Query Embed": {
+            "ai_embedding": [
+                [
+                    {
+                        "node": "Vector Store",
+                        "type": "ai_embedding",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Tool LLM": {
+            "ai_languageModel": [
+                [
+                    {
+                        "node": "Search Knowledge",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "versionId": "tdk-tables-images-v1",
+    "meta": {
+        "instanceId": "tdk-multimodal-v2"
+    },
+    "id": "TDK-Multimodal-Tables-Images",
+    "tags": []
+}
