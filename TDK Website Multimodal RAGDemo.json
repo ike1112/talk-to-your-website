@@ -1,5 +1,5 @@
 {
-  "name": "TDK Multimodal RAG (Fixed v2)",
+  "name": "TDK RAG (Text Only v4)",
   "nodes": [
     {
       "parameters": {},
@@ -99,7 +99,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// FIXED: Process ALL items, not just first\n// Content extraction: tables, images, text\n\nconst allInputs = $input.all();\nconst splitUrlsItems = $('Split URLs').all();\nconst results = [];\n\nfor (let i = 0; i < allInputs.length; i++) {\n  let html = allInputs[i].json.data || '';\n  html = typeof html === 'string' ? html : String(html || '');\n  \n  // Get page/url from Split URLs at same index\n  const page = splitUrlsItems[i]?.json?.page || 'unknown';\n  const baseUrl = splitUrlsItems[i]?.json?.url || '';\n  \n  if (!html || html.length < 100) {\n    results.push({\n      json: {\n        page: page,\n        url: baseUrl,\n        text: '',\n        images: [],\n        tableCount: 0,\n        imageCount: 0,\n        source: 'trustedpositioning.tdk.com',\n        error: 'Empty or invalid HTML response'\n      }\n    });\n    continue;\n  }\n  \n  function resolveUrl(src, base) {\n    try {\n      return new URL(src, base).href;\n    } catch (e) {\n      return src;\n    }\n  }\n  \n  // Table extraction - convert to markdown\n  function extractTables(html) {\n    const tables = [];\n    const tableRegex = /<table[^>]*>([\\s\\S]*?)<\\/table>/gi;\n    let tableMatch;\n    \n    while ((tableMatch = tableRegex.exec(html)) !== null) {\n      const tableHtml = tableMatch[0];\n      const rows = [];\n      const rowRegex = /<tr[^>]*>([\\s\\S]*?)<\\/tr>/gi;\n      let rowMatch;\n      \n      while ((rowMatch = rowRegex.exec(tableHtml)) !== null) {\n        const rowHtml = rowMatch[1];\n        const cells = [];\n        const cellRegex = /<t[hd][^>]*>([\\s\\S]*?)<\\/t[hd]>/gi;\n        let cellMatch;\n        \n        while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {\n          let cellText = cellMatch[1]\n            .replace(/<[^>]+>/g, ' ')\n            .replace(/&nbsp;/g, ' ')\n            .replace(/\\s+/g, ' ')\n            .trim();\n          cells.push(cellText);\n        }\n        \n        if (cells.length > 0) {\n          rows.push(cells);\n        }\n      }\n      \n      if (rows.length > 0) {\n        let markdown = '\\n\\n**[TABLE]**\\n';\n        const maxCols = Math.max(...rows.map(r => r.length));\n        \n        markdown += '| ' + rows[0].map(c => c || '-').join(' | ') + ' |\\n';\n        markdown += '|' + ' --- |'.repeat(maxCols) + '\\n';\n        \n        for (let j = 1; j < rows.length; j++) {\n          const paddedRow = [...rows[j]];\n          while (paddedRow.length < maxCols) paddedRow.push('-');\n          markdown += '| ' + paddedRow.join(' | ') + ' |\\n';\n        }\n        \n        tables.push(markdown);\n      }\n    }\n    \n    return tables;\n  }\n  \n  // Image extraction with smart filtering\n  function extractImages(html, baseUrl) {\n    const images = [];\n    const imageRegex = /<img[^>]+>/gi;\n    let match;\n    \n    while ((match = imageRegex.exec(html)) !== null) {\n      const imgTag = match[0];\n      let srcMatch = imgTag.match(/(?:data-src|src)=['\"]([^'\"]+)['\"]/i);\n      const altMatch = imgTag.match(/alt=['\"]([^'\"]*?)['\"]/i);\n      \n      if (!srcMatch) continue;\n      \n      let src = srcMatch[1];\n      const alt = altMatch ? altMatch[1] : '';\n      src = resolveUrl(src, baseUrl);\n      \n      const srcLower = src.toLowerCase();\n      const altLower = alt.toLowerCase();\n      \n      if (\n        srcLower.includes('icon') ||\n        srcLower.includes('favicon') ||\n        srcLower.includes('pixel') ||\n        srcLower.includes('spacer') ||\n        srcLower.includes('blank') ||\n        srcLower.includes('arrow') ||\n        srcLower.includes('bullet') ||\n        srcLower.includes('linkedin') ||\n        srcLower.includes('twitter') ||\n        srcLower.includes('facebook') ||\n        (srcLower.includes('youtube') && srcLower.includes('icon')) ||\n        srcLower.includes('menu') ||\n        srcLower.includes('hamburger') ||\n        srcLower.includes('close') ||\n        srcLower.includes('search') ||\n        /\\/w_[1-4]\\d,/.test(src) ||\n        /\\/h_[1-4]\\d,/.test(src) ||\n        (src.startsWith('data:') && src.length < 500)\n      ) {\n        continue;\n      }\n      \n      const isProductImage = \n        altLower.includes('product') ||\n        altLower.includes('auto') ||\n        altLower.includes('track') ||\n        altLower.includes('drive') ||\n        altLower.includes('stride') ||\n        altLower.includes('ride') ||\n        altLower.includes('venue') ||\n        altLower.includes('diagram') ||\n        altLower.includes('chart') ||\n        altLower.includes('banner') ||\n        altLower.includes('vehicle') ||\n        altLower.includes('robot') ||\n        altLower.includes('gps') ||\n        altLower.includes('positioning') ||\n        srcLower.includes('tp-product') ||\n        srcLower.includes('banner') ||\n        srcLower.includes('hero');\n      \n      const hasGoodSize = \n        /\\/w_[1-9]\\d{2,}/.test(src) ||\n        /\\/h_[1-9]\\d{2,}/.test(src) ||\n        !src.includes('wixstatic');\n      \n      if (src.startsWith('http') && (isProductImage || hasGoodSize)) {\n        images.push({\n          url: src,\n          alt: alt,\n          isProductImage: isProductImage\n        });\n      }\n    }\n    \n    const seen = new Set();\n    return images.filter(img => {\n      if (seen.has(img.url)) return false;\n      seen.add(img.url);\n      return true;\n    }).slice(0, 15);\n  }\n  \n  // Text extraction\n  function extractText(html) {\n    let text = html\n      .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n      .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n      .replace(/<nav[^>]*>[\\s\\S]*?<\\/nav>/gi, '')\n      .replace(/<footer[^>]*>[\\s\\S]*?<\\/footer>/gi, '')\n      .replace(/<table[^>]*>[\\s\\S]*?<\\/table>/gi, ' [TABLE_PLACEHOLDER] ')\n      .replace(/<h1[^>]*>([^<]*)<\\/h1>/gi, '\\n\\n# $1\\n')\n      .replace(/<h2[^>]*>([^<]*)<\\/h2>/gi, '\\n\\n## $1\\n')\n      .replace(/<h3[^>]*>([^<]*)<\\/h3>/gi, '\\n\\n### $1\\n')\n      .replace(/<h4[^>]*>([^<]*)<\\/h4>/gi, '\\n\\n#### $1\\n')\n      .replace(/<h5[^>]*>([^<]*)<\\/h5>/gi, '\\n\\n##### $1\\n')\n      .replace(/<h6[^>]*>([^<]*)<\\/h6>/gi, '\\n\\n###### $1\\n')\n      .replace(/<li[^>]*>/gi, '\\n• ')\n      .replace(/<\\/p>/gi, '\\n\\n')\n      .replace(/<br[^>]*>/gi, '\\n')\n      .replace(/<[^>]+>/g, ' ')\n      .replace(/&nbsp;/g, ' ')\n      .replace(/&amp;/g, '&')\n      .replace(/&lt;/g, '<')\n      .replace(/&gt;/g, '>')\n      .replace(/&quot;/g, '\"')\n      .replace(/&#39;/g, \"'\")\n      .replace(/&copy;/g, '©')\n      .replace(/&trade;/g, '™')\n      .replace(/&reg;/g, '®')\n      .replace(/[ \\t]+/g, ' ')\n      .replace(/\\n\\s*\\n\\s*\\n/g, '\\n\\n')\n      .trim();\n    \n    text = text\n      .replace(/xml version[^\"]*\"[^\"]*\"/g, '')\n      .replace(/top of page|bottom of page/gi, '')\n      .replace(/Sign In|Get Started|Newsletter|Subscribe/gi, '')\n      .replace(/All Rights Reserved[^\\n]*/gi, '')\n      .replace(/Privacy Policy|Terms of Use|Cookie Policy/gi, '')\n      .trim();\n    \n    return text;\n  }\n  \n  const tables = extractTables(html);\n  const images = extractImages(html, baseUrl);\n  let text = extractText(html);\n  \n  tables.forEach((table) => {\n    text = text.replace('[TABLE_PLACEHOLDER]', table);\n  });\n  text = text.replace(/\\[TABLE_PLACEHOLDER\\]/g, '');\n  \n  results.push({\n    json: {\n      page: page,\n      url: baseUrl,\n      text: text,\n      images: images,\n      tableCount: tables.length,\n      imageCount: images.length,\n      source: 'trustedpositioning.tdk.com'\n    }\n  });\n}\n\nreturn results;"
+        "jsCode": "// Extract text and tables from HTML (no images)\n\nconst allInputs = $input.all();\nconst splitUrlsItems = $('Split URLs').all();\nconst results = [];\n\nfor (let i = 0; i < allInputs.length; i++) {\n  let html = allInputs[i].json.data || '';\n  html = typeof html === 'string' ? html : String(html || '');\n  \n  const page = splitUrlsItems[i]?.json?.page || 'unknown';\n  const baseUrl = splitUrlsItems[i]?.json?.url || '';\n  \n  if (!html || html.length < 100) {\n    results.push({\n      json: {\n        page: page,\n        url: baseUrl,\n        text: '',\n        tableCount: 0,\n        source: 'trustedpositioning.tdk.com',\n        error: 'Empty or invalid HTML response'\n      }\n    });\n    continue;\n  }\n  \n  // Table extraction - convert to markdown\n  function extractTables(html) {\n    const tables = [];\n    const tableRegex = /<table[^>]*>([\\s\\S]*?)<\\/table>/gi;\n    let tableMatch;\n    \n    while ((tableMatch = tableRegex.exec(html)) !== null) {\n      const tableHtml = tableMatch[0];\n      const rows = [];\n      const rowRegex = /<tr[^>]*>([\\s\\S]*?)<\\/tr>/gi;\n      let rowMatch;\n      \n      while ((rowMatch = rowRegex.exec(tableHtml)) !== null) {\n        const rowHtml = rowMatch[1];\n        const cells = [];\n        const cellRegex = /<t[hd][^>]*>([\\s\\S]*?)<\\/t[hd]>/gi;\n        let cellMatch;\n        \n        while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {\n          let cellText = cellMatch[1]\n            .replace(/<[^>]+>/g, ' ')\n            .replace(/&nbsp;/g, ' ')\n            .replace(/\\s+/g, ' ')\n            .trim();\n          cells.push(cellText);\n        }\n        \n        if (cells.length > 0) {\n          rows.push(cells);\n        }\n      }\n      \n      if (rows.length > 0) {\n        let markdown = '\\n\\n**[TABLE]**\\n';\n        const maxCols = Math.max(...rows.map(r => r.length));\n        \n        markdown += '| ' + rows[0].map(c => c || '-').join(' | ') + ' |\\n';\n        markdown += '|' + ' --- |'.repeat(maxCols) + '\\n';\n        \n        for (let j = 1; j < rows.length; j++) {\n          const paddedRow = [...rows[j]];\n          while (paddedRow.length < maxCols) paddedRow.push('-');\n          markdown += '| ' + paddedRow.join(' | ') + ' |\\n';\n        }\n        \n        tables.push(markdown);\n      }\n    }\n    \n    return tables;\n  }\n  \n  // Text extraction\n  function extractText(html) {\n    let text = html\n      .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n      .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n      .replace(/<nav[^>]*>[\\s\\S]*?<\\/nav>/gi, '')\n      .replace(/<footer[^>]*>[\\s\\S]*?<\\/footer>/gi, '')\n      .replace(/<table[^>]*>[\\s\\S]*?<\\/table>/gi, ' [TABLE_PLACEHOLDER] ')\n      .replace(/<h1[^>]*>([^<]*)<\\/h1>/gi, '\\n\\n# $1\\n')\n      .replace(/<h2[^>]*>([^<]*)<\\/h2>/gi, '\\n\\n## $1\\n')\n      .replace(/<h3[^>]*>([^<]*)<\\/h3>/gi, '\\n\\n### $1\\n')\n      .replace(/<h4[^>]*>([^<]*)<\\/h4>/gi, '\\n\\n#### $1\\n')\n      .replace(/<h5[^>]*>([^<]*)<\\/h5>/gi, '\\n\\n##### $1\\n')\n      .replace(/<h6[^>]*>([^<]*)<\\/h6>/gi, '\\n\\n###### $1\\n')\n      .replace(/<li[^>]*>/gi, '\\n• ')\n      .replace(/<\\/p>/gi, '\\n\\n')\n      .replace(/<br[^>]*>/gi, '\\n')\n      .replace(/<[^>]+>/g, ' ')\n      .replace(/&nbsp;/g, ' ')\n      .replace(/&amp;/g, '&')\n      .replace(/&lt;/g, '<')\n      .replace(/&gt;/g, '>')\n      .replace(/&quot;/g, '\"')\n      .replace(/&#39;/g, \"'\")\n      .replace(/&copy;/g, '©')\n      .replace(/&trade;/g, '™')\n      .replace(/&reg;/g, '®')\n      .replace(/[ \\t]+/g, ' ')\n      .replace(/\\n\\s*\\n\\s*\\n/g, '\\n\\n')\n      .trim();\n    \n    text = text\n      .replace(/xml version[^\"]*\"[^\"]*\"/g, '')\n      .replace(/top of page|bottom of page/gi, '')\n      .replace(/Sign In|Get Started|Newsletter|Subscribe/gi, '')\n      .replace(/All Rights Reserved[^\\n]*/gi, '')\n      .replace(/Privacy Policy|Terms of Use|Cookie Policy/gi, '')\n      .trim();\n    \n    return text;\n  }\n  \n  const tables = extractTables(html);\n  let text = extractText(html);\n  \n  tables.forEach((table) => {\n    text = text.replace('[TABLE_PLACEHOLDER]', table);\n  });\n  text = text.replace(/\\[TABLE_PLACEHOLDER\\]/g, '');\n  \n  results.push({\n    json: {\n      page: page,\n      url: baseUrl,\n      text: text,\n      tableCount: tables.length,\n      source: 'trustedpositioning.tdk.com'\n    }\n  });\n}\n\nreturn results;"
       },
       "id": "a3c6d7c0-5b17-483a-8c54-cd2cc9dba0ee",
       "name": "Extract Content",
@@ -112,10 +112,10 @@
     },
     {
       "parameters": {
-        "jsCode": "// FIXED: Process ALL items, not just first\n// Split images for Vision API processing\n\nconst allInputs = $input.all();\nconst results = [];\n\nfor (let i = 0; i < allInputs.length; i++) {\n  const input = allInputs[i].json;\n  const images = input.images || [];\n  \n  if (images.length === 0) {\n    results.push({\n      json: {\n        ...input,\n        imageDescriptions: [],\n        skipVision: true\n      }\n    });\n    continue;\n  }\n  \n  for (let index = 0; index < images.length; index++) {\n    const img = images[index];\n    results.push({\n      json: {\n        imageUrl: img.url,\n        imageAlt: img.alt,\n        isProductImage: img.isProductImage,\n        imageIndex: index,\n        pageData: {\n          page: input.page,\n          url: input.url,\n          text: input.text,\n          tableCount: input.tableCount,\n          source: input.source\n        }\n      }\n    });\n  }\n}\n\nreturn results;"
+        "jsCode": "// Build final documents for embedding\n\nconst allInputs = $input.all();\nconst results = [];\n\nfor (const item of allInputs) {\n  const data = item.json;\n  \n  // Build content with metadata\n  const content = `SOURCE: ${data.url}\\nPAGE: ${data.page}\\n\\n${data.text}`;\n  \n  results.push({\n    json: {\n      content: content,\n      page: data.page,\n      url: data.url,\n      source: data.source,\n      tableCount: data.tableCount || 0,\n      contentType: 'text'\n    }\n  });\n}\n\nreturn results;"
       },
-      "id": "93928f85-ddb4-4c5f-aef4-34df16bb3357",
-      "name": "Split Images",
+      "id": "65062344-5507-472a-8c61-8fe92f9a93e5",
+      "name": "Build Documents",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -125,82 +125,14 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.openai.com/v1/chat/completions",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "openAiApi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are analyzing images from TDK Trusted Positioning's website. This company makes GPS/GNSS positioning software for environments where satellite signals are degraded (tunnels, urban canyons, indoors).\\n\\nProducts: AUTO (autonomous vehicles), TRACK (fleet tracking), DRIVE (navigation), STRIDE (wearables), RIDE (micromobility), VENUE (indoor positioning).\\n\\nDescribe what you see:\\n- Technical diagrams: components and data flow\\n- Product images: what product/use case is shown\\n- Charts: what data is being compared\\n- Architecture: system components and relationships\\n\\nBe specific. Include key text visible in the image. Keep under 150 words.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Describe this image from the '{{ $json.pageData.page }}' page.{{ $json.imageAlt ? ' Context: ' + $json.imageAlt : '' }}\"\n        },\n        {\n          \"type\": \"image_url\",\n          \"image_url\": {\n            \"url\": \"{{ $json.imageUrl }}\",\n            \"detail\": \"low\"\n          }\n        }\n      ]\n    }\n  ],\n  \"max_tokens\": 250\n}",
-        "options": {
-          "timeout": 60000
-        }
+        "jsCode": "// Prepare markdown content as downloadable binary\n\nconst allInputs = $input.all();\nconst results = [];\n\nfor (const item of allInputs) {\n  const data = item.json;\n  \n  // Build markdown content\n  let markdown = `# ${data.page.toUpperCase()}\\n\\n`;\n  markdown += `**Source:** ${data.url}\\n`;\n  markdown += `**Tables:** ${data.tableCount}\\n`;\n  markdown += `**Generated:** ${new Date().toISOString()}\\n\\n`;\n  markdown += `---\\n\\n`;\n  markdown += data.content;\n  \n  // Convert to base64 for binary output\n  const base64Content = Buffer.from(markdown, 'utf8').toString('base64');\n  \n  results.push({\n    json: {\n      content: data.content,\n      page: data.page,\n      url: data.url,\n      source: data.source,\n      tableCount: data.tableCount,\n      contentType: data.contentType\n    },\n    binary: {\n      file: {\n        data: base64Content,\n        mimeType: 'text/markdown',\n        fileName: `${data.page}.md`\n      }\n    }\n  });\n}\n\nreturn results;"
       },
-      "id": "db6ff2de-7b73-4754-806a-d5aeeb9f12fe",
-      "name": "Vision API",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "id": "d4e5f6a7-b8c9-0123-def0-456789012345",
+      "name": "Save Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         1408,
-        0
-      ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 3000,
-      "credentials": {
-        "openAiApi": {
-          "id": "XMBZsUMZC08LBkB0",
-          "name": "OpenAi account"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "// FIXED: Process ALL items, not just first\n// Extract description from Vision API response\n\nconst allInputs = $input.all();\nconst splitImagesItems = $('Split Images').all();\nconst results = [];\n\nfor (let i = 0; i < allInputs.length; i++) {\n  const input = allInputs[i].json;\n  let description = '';\n  \n  try {\n    if (input.choices && input.choices[0]) {\n      description = input.choices[0].message.content;\n    } else if (input.error) {\n      description = `[Vision failed: ${input.error.message || 'Unknown error'}]`;\n    } else {\n      description = '[Vision failed]';\n    }\n  } catch (e) {\n    description = '[Vision failed]';\n  }\n  \n  const splitData = splitImagesItems[i]?.json || {};\n  \n  results.push({\n    json: {\n      description: description,\n      imageUrl: splitData.imageUrl,\n      imageAlt: splitData.imageAlt,\n      imageIndex: splitData.imageIndex,\n      pageData: splitData.pageData,\n      skipVision: splitData.skipVision\n    }\n  });\n}\n\nreturn results;"
-      },
-      "id": "ed540306-f4cd-4135-916b-94f65445a94a",
-      "name": "Parse Response",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1632,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "aggregate": "aggregateAllItemData",
-        "options": {}
-      },
-      "id": "395eef77-793c-47bf-ba81-cd059f8827c2",
-      "name": "Aggregate",
-      "type": "n8n-nodes-base.aggregate",
-      "typeVersion": 1,
-      "position": [
-        1856,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Combine text, tables, and image descriptions into final documents\nconst items = $input.first().json.data;\n\nif (!items || items.length === 0) {\n  return [{ json: { error: 'No data to process' } }];\n}\n\nconst pageGroups = {};\n\nitems.forEach(item => {\n  if (item.skipVision) {\n    pageGroups[item.page] = {\n      page: item.page,\n      url: item.url,\n      text: item.text,\n      tableCount: item.tableCount,\n      source: item.source,\n      imageDescriptions: []\n    };\n    return;\n  }\n  \n  if (item.pageData) {\n    const page = item.pageData.page;\n    if (!pageGroups[page]) {\n      pageGroups[page] = {\n        page: item.pageData.page,\n        url: item.pageData.url,\n        text: item.pageData.text,\n        tableCount: item.pageData.tableCount,\n        source: item.pageData.source,\n        imageDescriptions: []\n      };\n    }\n    \n    if (item.description && !item.description.includes('failed')) {\n      pageGroups[page].imageDescriptions.push({\n        url: item.imageUrl,\n        alt: item.imageAlt,\n        description: item.description\n      });\n    }\n  }\n});\n\nconst results = Object.values(pageGroups).map(pageData => {\n  // CRITICAL: We prepend the metadata directly into the 'content' field\n  let content = `SOURCE: ${pageData.url}\\nPAGE: ${pageData.page}\\n\\n${pageData.text}`;\n  \n  if (pageData.imageDescriptions.length > 0) {\n    content += '\\n\\n=== VISUAL CONTENT ===\\n';\n    pageData.imageDescriptions.forEach((img, i) => {\n      content += `\\n[Image ${i + 1}]`;\n      if (img.alt) content += ` (${img.alt})`;\n      content += `:\\n${img.description}\\n`;\n    });\n  }\n  \n  return {\n    json: {\n      content: content,\n      page: pageData.page,\n      url: pageData.url,\n      source: pageData.source,\n      tableCount: pageData.tableCount || 0,\n      imageCount: pageData.imageDescriptions.length,\n      contentType: 'multimodal'\n    }\n  };\n});\n\nreturn results;"
-      },
-      "id": "65062344-5507-472a-8c61-8fe92f9a93e5",
-      "name": "Build Documents",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2080,
         0
       ]
     },
@@ -214,7 +146,7 @@
       "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
       "typeVersion": 1,
       "position": [
-        2224,
+        1520,
         240
       ],
       "credentials": {
@@ -256,7 +188,7 @@
       "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
       "typeVersion": 1,
       "position": [
-        2432,
+        1728,
         224
       ]
     },
@@ -271,7 +203,7 @@
       "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
       "typeVersion": 1,
       "position": [
-        2368,
+        1664,
         432
       ]
     },
@@ -292,7 +224,7 @@
       "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
       "typeVersion": 1,
       "position": [
-        2336,
+        1632,
         0
       ],
       "credentials": {
@@ -309,7 +241,7 @@
             {
               "id": "status",
               "name": "status",
-              "value": "={{ $json.page }}: {{ $json.tableCount }} tables, {{ $json.imageCount }} images indexed",
+              "value": "={{ $json.page }}: {{ $json.tableCount }} tables indexed",
               "type": "string"
             }
           ]
@@ -321,7 +253,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2800,
+        2096,
         0
       ]
     },
@@ -364,7 +296,7 @@
         "promptType": "define",
         "text": "={{ $('Chat').item.json.chatInput }}",
         "options": {
-          "systemMessage": "You are a product consultant for TDK Trusted Positioning. \n\nCRITICAL: You MUST ALWAYS call the 'tdk_knowledge' tool before answering any question. Using internal memory or knowledge is strictly prohibited. If the tool returns no relevant information, state that the information is not available in the database.\n\n## Product Selection Guide:\n- AUTO: Only for autonomous vehicles (L4/L5) or robotics. 100Hz accuracy.\n- DRIVE: For human drivers, navigation, and lane-level guidance. 100Hz accuracy.\n- TRACK: For fleet management and logistics tracking. 1Hz update rate.\n- VENUE: Indoor positioning for warehouses and factories.\n- STRIDE: Wearables and IoT.\n- RIDE: Micromobility (scooters, bikes).\n\n## Operational Rules:\n- Explain WHY a product fits based on technical specs (e.g., update rate differences).\n- Use \"VISUAL CONTENT\" sections to describe diagrams or system flows.\n- Be direct and technical.\n\n"
+          "systemMessage": "You are a product consultant for TDK Trusted Positioning. \n\nCRITICAL: You MUST ALWAYS call the 'tdk_knowledge' tool before answering any question. Using internal memory or knowledge is strictly prohibited. If the tool returns no relevant information, state that the information is not available in the database.\n\n## Product Selection Guide:\n- AUTO: Only for autonomous vehicles (L4/L5) or robotics. 100Hz accuracy.\n- DRIVE: For human drivers, navigation, and lane-level guidance. 100Hz accuracy.\n- TRACK: For fleet management and logistics tracking. 1Hz update rate.\n- VENUE: Indoor positioning for warehouses and factories.\n- STRIDE: Wearables and IoT.\n- RIDE: Micromobility (scooters, bikes).\n\n## Operational Rules:\n- Explain WHY a product fits based on technical specs (e.g., update rate differences).\n- Be direct and technical.\n\n"
         }
       },
       "id": "2c4f1ceb-cfb5-4f27-874f-437c0275e4e1",
@@ -392,7 +324,7 @@
     {
       "parameters": {
         "name": "tdk_knowledge",
-        "description": "TDK Trusted Positioning knowledge base containing product information, technical specs, comparison tables, and diagram descriptions.\n\nMUST USE THIS TOOL for any questions about TDK products (AUTO, TRACK, VENUE, etc.). This tool contains the ONLY valid source URLs and technical specifications. Do not answer from memory.",
+        "description": "TDK Trusted Positioning knowledge base containing product information, technical specs, and comparison tables.\n\nMUST USE THIS TOOL for any questions about TDK products (AUTO, TRACK, VENUE, etc.). This tool contains the ONLY valid source URLs and technical specifications. Do not answer from memory.",
         "topK": 10
       },
       "id": "2c17b534-6acc-433e-afba-5e2dc2855bf4",
@@ -531,50 +463,6 @@
       "main": [
         [
           {
-            "node": "Split Images",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Split Images": {
-      "main": [
-        [
-          {
-            "node": "Vision API",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Vision API": {
-      "main": [
-        [
-          {
-            "node": "Parse Response",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Response": {
-      "main": [
-        [
-          {
-            "node": "Aggregate",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Aggregate": {
-      "main": [
-        [
-          {
             "node": "Build Documents",
             "type": "main",
             "index": 0
@@ -583,6 +471,17 @@
       ]
     },
     "Build Documents": {
+      "main": [
+        [
+          {
+            "node": "Save Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Documents": {
       "main": [
         [
           {
@@ -720,7 +619,7 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "7139ddf8-141c-48d7-a5ad-2e7651ffa9c5",
+  "versionId": "9351ffg0-363e-60f9-c7cf-4g8873hhc9e7",
   "meta": {
     "instanceId": "485201702c5dc87991ea5296475b11947e8122f3e652c9f4d4c3a7e1b03fe7aa"
   },
